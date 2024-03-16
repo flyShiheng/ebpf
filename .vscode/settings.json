@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "test_map.skel.h": "c",
+        "test_map.h": "c",
+        "bpf_helpers.h": "c",
+        "bpf_core_read.h": "c",
+        "bpf.h": "c",
+        "bpf_helper_defs.h": "c",
+        "unistd.h": "c",
+        "map": "c"
+    }
+}
