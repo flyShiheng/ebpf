@@ -21,6 +21,8 @@
     bpftool map dump name hello.rodata
     rm /sys/fs/bpf/test_map
 
+    cat /proc/kallsyms | grep sys_execve
+
     kernel-test https://github.com/torvalds/linux/tree/master/tools/testing/selftests/bpf
     https://www.kernel.org/doc/html/latest/bpf/maps.html
     https://docs.kernel.org/userspace-api/ebpf/syscall.html
