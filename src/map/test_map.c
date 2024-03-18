@@ -1,77 +1,72 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <errno.h>
+#include "linux/bpf.h"
 #include <bpf/libbpf.h>
-#include "test_map.h"
-#include "test_map.skel.h"
+#include <stdio.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <sched.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <locale.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/wait.h>
 
-static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
-{
-	if (level >= LIBBPF_DEBUG)
-		return 0;
+#include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 
-	return vfprintf(stderr, format, args);
-}
+int main() {
+    struct bpf_link *link = NULL;
+    struct bpf_program *bpf_prog = NULL;
+    struct bpf_object *obj = NULL;
+    int key, next_key;
+    __u64 value;
+    int map_fd;
+    char* sec_name = "test_map.bpf.o";
 
-void handle_event(void *ctx, int cpu, void *data, unsigned int data_sz)
-{
-	struct data_t *m = data;
-
-	printf("%-6d %-6d %-16s %-16s %s\n", m->pid, m->uid, m->command, m->path, m->message);
-}
-
-void lost_event(void *ctx, int cpu, long long unsigned int data_sz)
-{
-	printf("lost event\n");
-}
-
-int main()
-{
-    struct test_map_bpf *skel;
-    int err;
-	struct perf_buffer *pb = NULL;
-
-	libbpf_set_print(libbpf_print_fn);
-
-	skel = test_map_bpf__open_and_load();
-	if (!skel) {
-		printf("Failed to open BPF object\n");
+	obj = bpf_object__open_file(sec_name, NULL);
+	if (libbpf_get_error(obj)) {
+		printf("ERROR: opening BPF object file failed\n");
 		return 1;
 	}
 
-	err = test_map_bpf__attach(skel);
-	if (err) {
-		fprintf(stderr, "Failed to attach BPF skeleton: %d\n", err);
-		test_map_bpf__destroy(skel);
-        return 1;
+	if (bpf_object__load(obj)) {
+		printf("ERROR: loading BPF object file failed\n");
+		goto err;
 	}
 
-    struct perf_buffer_opts opts;
-    opts.sample_cb = handle_event;
-    opts.lost_cb   = lost_event;
-
-	pb = perf_buffer__new(bpf_map__fd(skel->maps.output), 8, &opts);
-	if (!pb) {
-		err = -1;
-		fprintf(stderr, "Failed to create ring buffer\n");
-		test_map_bpf__destroy(skel);
-        return 1;
+	map_fd = bpf_object__find_map_fd_by_name(obj, "execve_count");
+	if (map_fd < 0) {
+		printf("ERROR: finding a map in obj file failed\n");
+		goto err;
 	}
 
-	while (true) {
-		err = perf_buffer__poll(pb, 100 /* timeout, ms */);
-		// Ctrl-C gives -EINTR
-		if (err == -EINTR) {
-			err = 0;
-			break;
-		}
-		if (err < 0) {
-			printf("Error polling perf buffer: %d\n", err);
-			break;
-		}
+	bpf_prog = bpf_object__find_program_by_name(obj, "kprobe_bpf_geteuid");
+	if (!bpf_prog) {
+		printf("finding a prog in obj file failed\n");
+		goto err;
 	}
 
-	perf_buffer__free(pb);
-	test_map_bpf__destroy(skel);
-	return -err;
+	link = bpf_program__attach(bpf_prog);
+	if (libbpf_get_error(link)) {
+		printf("ERROR: bpf_program__attach failed\n");
+		link = NULL;
+		goto err;
+	}
+
+    sleep(3);
+	while (bpf_map_get_next_key(map_fd, &key, &next_key) == 0) {
+		bpf_map_lookup_elem(map_fd, &next_key, &value);
+		key = next_key;
+        printf("key:%d, value:%llu\n", key, value);
+    }
+
+err:
+	bpf_link__destroy(link);
+	bpf_object__close(obj);
+
+    return 0;
 }
